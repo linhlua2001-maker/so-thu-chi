@@ -213,23 +213,25 @@ export default function ExpenseTrackerApp() {
 
       sharedTxs.push(t);
 
+      const sign = t.type === 'income' ? -1 : 1;
+
       if (mode === 'split_50_50') {
         if (t.createdBy === 'Linh') {
-          hanhOwesLinh += amt / 2;
+          hanhOwesLinh += sign * (amt / 2);
         } else if (t.createdBy === 'Hạnh') {
-          hanhOwesLinh -= amt / 2;
+          hanhOwesLinh -= sign * (amt / 2);
         }
       } else if (mode === 'pay_for_other') {
         if (t.createdBy === 'Linh') {
-          hanhOwesLinh += amt;
+          hanhOwesLinh += sign * amt;
         } else if (t.createdBy === 'Hạnh') {
-          hanhOwesLinh -= amt;
+          hanhOwesLinh -= sign * amt;
         }
       } else if (mode === 'repay') {
-        if (t.createdBy === 'Hạnh') {
-          hanhOwesLinh -= amt;
-        } else if (t.createdBy === 'Linh') {
-          hanhOwesLinh += amt;
+        if (t.createdBy === 'Linh') {
+          hanhOwesLinh += sign * amt;
+        } else if (t.createdBy === 'Hạnh') {
+          hanhOwesLinh -= sign * amt;
         }
       }
     });
@@ -1130,12 +1132,25 @@ export default function ExpenseTrackerApp() {
                 }
 
                 let impactText = '';
+                const otherUser = t.createdBy === 'Linh' ? 'Hạnh' : 'Linh';
                 if (t.splitMode === 'split_50_50') {
-                  impactText = `${t.createdBy} chi ${formatCurrency(t.amount)} -> ${t.createdBy === 'Linh' ? 'Hạnh' : 'Linh'} nợ ${formatCurrency(t.amount / 2)}`;
+                  if (t.type === 'expense') {
+                    impactText = `${t.createdBy} chi ${formatCurrency(t.amount)} -> ${otherUser} nợ ${formatCurrency(t.amount / 2)}`;
+                  } else {
+                    impactText = `${t.createdBy} nhận chung ${formatCurrency(t.amount)} -> ${t.createdBy} nợ lại ${otherUser} ${formatCurrency(t.amount / 2)}`;
+                  }
                 } else if (t.splitMode === 'pay_for_other') {
-                  impactText = `${t.createdBy} trả hộ 100% -> ${t.createdBy === 'Linh' ? 'Hạnh' : 'Linh'} nợ ${formatCurrency(t.amount)}`;
+                  if (t.type === 'expense') {
+                    impactText = `${t.createdBy} trả hộ 100% -> ${otherUser} nợ ${formatCurrency(t.amount)}`;
+                  } else {
+                    impactText = `${t.createdBy} thu hộ 100% -> ${t.createdBy} nợ lại ${otherUser} ${formatCurrency(t.amount)}`;
+                  }
                 } else if (t.splitMode === 'repay') {
-                  impactText = `${t.createdBy} trả nợ cho ${t.createdBy === 'Linh' ? 'Hạnh' : 'Linh'} ${formatCurrency(t.amount)}`;
+                  if (t.type === 'expense') {
+                    impactText = `${t.createdBy} trả nợ cho ${otherUser} ${formatCurrency(t.amount)}`;
+                  } else {
+                    impactText = `${t.createdBy} nhận trả nợ từ ${otherUser} ${formatCurrency(t.amount)}`;
+                  }
                 }
 
                 return (
