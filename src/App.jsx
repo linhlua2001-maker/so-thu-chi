@@ -3,7 +3,8 @@ import {
   Home, PlusCircle, List as ListIcon, Wallet, Trash2, Pencil,
   Calendar, AlignLeft, DollarSign, PieChart, Settings, 
   Plus, X, Lock, Download, Sun, Moon, Eye, EyeOff, 
-  ChevronDown, ChevronRight, ArrowLeft, ChevronLeft, Save
+  ChevronDown, ChevronRight, ArrowLeft, ChevronLeft, Save,
+  Users
 } from 'lucide-react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
@@ -94,6 +95,7 @@ export default function ExpenseTrackerApp() {
   const [formCategory, setFormCategory] = useState(null);
   const [formDate, setFormDate] = useState(new Date().toISOString().split('T')[0]);
   const [formNote, setFormNote] = useState('');
+  const [formSplitMode, setFormSplitMode] = useState('personal'); // 'personal', 'split_50_50', 'pay_for_other', 'repay'
 
   // Form Sửa giao dịch (Edit Modal)
   const [editTxId, setEditTxId] = useState(null);
@@ -102,6 +104,7 @@ export default function ExpenseTrackerApp() {
   const [editFormCategory, setEditFormCategory] = useState(null);
   const [editFormDate, setEditFormDate] = useState('');
   const [editFormNote, setEditFormNote] = useState('');
+  const [editFormSplitMode, setEditFormSplitMode] = useState('personal');
 
   // Cài đặt danh mục
   const [newCatName, setNewCatName] = useState('');
@@ -197,6 +200,43 @@ export default function ExpenseTrackerApp() {
     return { balance: initialBalance + inc - exp };
   }, [transactions, initialBalance]);
 
+  const debtSummary = useMemo(() => {
+    let hanhOwesLinh = 0;
+    const sharedTxs = [];
+
+    transactions.forEach(t => {
+      const mode = t.splitMode || 'personal';
+      if (mode === 'personal') return;
+
+      const amt = parseFloat(t.amount);
+      if (isNaN(amt) || amt <= 0) return;
+
+      sharedTxs.push(t);
+
+      if (mode === 'split_50_50') {
+        if (t.createdBy === 'Linh') {
+          hanhOwesLinh += amt / 2;
+        } else if (t.createdBy === 'Hạnh') {
+          hanhOwesLinh -= amt / 2;
+        }
+      } else if (mode === 'pay_for_other') {
+        if (t.createdBy === 'Linh') {
+          hanhOwesLinh += amt;
+        } else if (t.createdBy === 'Hạnh') {
+          hanhOwesLinh -= amt;
+        }
+      } else if (mode === 'repay') {
+        if (t.createdBy === 'Hạnh') {
+          hanhOwesLinh -= amt;
+        } else if (t.createdBy === 'Linh') {
+          hanhOwesLinh += amt;
+        }
+      }
+    });
+
+    return { hanhOwesLinh, sharedTxs };
+  }, [transactions]);
+
   const handleAddTransaction = async (e) => {
     e.preventDefault();
     const amount = parseInputNumber(formAmount);
@@ -207,9 +247,10 @@ export default function ExpenseTrackerApp() {
         type: formType, amount: amount, category: formCategory.name,
         categoryIcon: formCategory.icon, date: formDate, note: formNote, 
         createdBy: activeUser, // Lưu người nhập
+        splitMode: formSplitMode, // Lưu hình thức chia sẻ
         createdAt: new Date().toISOString()
       });
-      setFormAmount(''); setFormNote(''); 
+      setFormAmount(''); setFormNote(''); setFormSplitMode('personal');
       showToast('Đã lưu giao dịch!'); 
     } catch (error) { console.error("Lỗi khi lưu:", error); }
   };
@@ -220,6 +261,7 @@ export default function ExpenseTrackerApp() {
     setEditFormAmount(formatInputNumber(tx.amount.toString()));
     setEditFormDate(tx.date);
     setEditFormNote(tx.note || '');
+    setEditFormSplitMode(tx.splitMode || 'personal');
     
     // Tìm danh mục tương ứng
     const catList = categories[tx.type];
@@ -235,6 +277,7 @@ export default function ExpenseTrackerApp() {
       await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'transactions', editTxId), {
         type: editFormType, amount: amount, category: editFormCategory.name,
         categoryIcon: editFormCategory.icon, date: editFormDate, note: editFormNote, 
+        splitMode: editFormSplitMode,
         updatedAt: new Date().toISOString()
       });
       setEditTxId(null);
@@ -344,6 +387,23 @@ export default function ExpenseTrackerApp() {
                   ))}
                 </div>
               )}
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2">Chia sẻ giao dịch</label>
+              <div className="grid grid-cols-4 gap-2">
+                {[
+                  { mode: 'personal', label: 'Cá nhân', icon: '👤' },
+                  { mode: 'split_50_50', label: 'Chia đôi', icon: '👥' },
+                  { mode: 'pay_for_other', label: 'Cho vay/Trả hộ', icon: '💸' },
+                  { mode: 'repay', label: 'Trả nợ', icon: '🔄' }
+                ].map(item => (
+                  <button key={item.mode} type="button" onClick={() => setEditFormSplitMode(item.mode)}
+                    className={`flex flex-col items-center justify-center p-2 rounded-xl border transition-colors ${editFormSplitMode === item.mode ? 'border-teal-500 bg-teal-50 dark:bg-teal-900/20 text-teal-600 dark:text-teal-400 font-bold' : 'border-gray-100 dark:border-gray-700 bg-white dark:bg-gray-800 opacity-70 hover:opacity-100'}`}>
+                    <span className="text-lg mb-1">{item.icon}</span>
+                    <span className="text-[9px] font-medium truncate w-full text-center">{item.label}</span>
+                  </button>
+                ))}
+              </div>
             </div>
             <div className="grid grid-cols-1 gap-4 bg-white dark:bg-gray-800 p-4 rounded-xl border border-gray-100 dark:border-gray-700 shadow-sm">
               <div>
@@ -502,6 +562,15 @@ export default function ExpenseTrackerApp() {
                             {t.createdBy}
                           </span>
                         )}
+                        {t.splitMode && t.splitMode !== 'personal' && (
+                          <span className={`ml-1 px-1.5 py-0.5 rounded-[4px] text-[8px] font-bold shrink-0 ${
+                            t.splitMode === 'split_50_50' ? 'bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400' :
+                            t.splitMode === 'pay_for_other' ? 'bg-yellow-100 text-yellow-600 dark:bg-yellow-900/30 dark:text-yellow-400' :
+                            'bg-teal-100 text-teal-600 dark:bg-teal-900/30 dark:text-teal-400'
+                          }`}>
+                            {t.splitMode === 'split_50_50' ? 'Chia đôi' : t.splitMode === 'pay_for_other' ? 'Trả hộ' : 'Trả nợ'}
+                          </span>
+                        )}
                       </p>
                     </div>
                   </div>
@@ -552,6 +621,23 @@ export default function ExpenseTrackerApp() {
               ))}
             </div>
           )}
+        </div>
+        <div>
+          <label className="block text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-2">Chia sẻ giao dịch</label>
+          <div className="grid grid-cols-4 gap-2">
+            {[
+              { mode: 'personal', label: 'Cá nhân', icon: '👤' },
+              { mode: 'split_50_50', label: 'Chia đôi', icon: '👥' },
+              { mode: 'pay_for_other', label: 'Cho vay/Trả hộ', icon: '💸' },
+              { mode: 'repay', label: 'Trả nợ', icon: '🔄' }
+            ].map(item => (
+              <button key={item.mode} type="button" onClick={() => setFormSplitMode(item.mode)}
+                className={`flex flex-col items-center justify-center p-2 rounded-xl border transition-colors ${formSplitMode === item.mode ? 'border-teal-500 bg-teal-50 dark:bg-teal-900/20 text-teal-600 dark:text-teal-400 font-bold' : 'border-gray-100 dark:border-gray-700 bg-white dark:bg-gray-800 opacity-70 hover:opacity-100'}`}>
+                <span className="text-lg mb-1">{item.icon}</span>
+                <span className="text-[9px] font-medium truncate w-full text-center">{item.label}</span>
+              </button>
+            ))}
+          </div>
         </div>
         <div className="grid grid-cols-1 gap-4 bg-white dark:bg-gray-800 p-4 rounded-xl border border-gray-100 dark:border-gray-700 shadow-sm transition-colors">
           <div>
@@ -645,6 +731,15 @@ export default function ExpenseTrackerApp() {
                               {t.createdBy && (
                                 <span className={`ml-2 px-1.5 py-0.5 rounded-[4px] text-[8px] font-bold shrink-0 ${t.createdBy === 'Linh' ? 'bg-purple-100 text-purple-600 dark:bg-purple-900/30 dark:text-purple-400' : 'bg-orange-100 text-orange-600 dark:bg-orange-900/30 dark:text-orange-400'}`}>
                                   {t.createdBy}
+                                </span>
+                              )}
+                              {t.splitMode && t.splitMode !== 'personal' && (
+                                <span className={`ml-1 px-1.5 py-0.5 rounded-[4px] text-[8px] font-bold shrink-0 ${
+                                  t.splitMode === 'split_50_50' ? 'bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400' :
+                                  t.splitMode === 'pay_for_other' ? 'bg-yellow-100 text-yellow-600 dark:bg-yellow-900/30 dark:text-yellow-400' :
+                                  'bg-teal-100 text-teal-600 dark:bg-teal-900/30 dark:text-teal-400'
+                                }`}>
+                                  {t.splitMode === 'split_50_50' ? 'Chia đôi' : t.splitMode === 'pay_for_other' ? 'Trả hộ' : 'Trả nợ'}
                                 </span>
                               )}
                             </p>
@@ -936,6 +1031,148 @@ export default function ExpenseTrackerApp() {
     );
   };
 
+  const renderDebt = () => {
+    const { hanhOwesLinh, sharedTxs } = debtSummary;
+
+    let statusText = '';
+    let statusSubtext = '';
+    let amountText = '';
+    let cardBg = 'bg-teal-50 dark:bg-teal-950/30 border-teal-100 dark:border-teal-900/50';
+    let textColor = 'text-teal-600 dark:text-teal-400';
+    let hasDebt = true;
+
+    if (hanhOwesLinh > 0) {
+      amountText = formatCurrency(hanhOwesLinh);
+      if (activeUser === 'Linh') {
+        statusText = 'Hạnh đang nợ bạn';
+        statusSubtext = 'Hạnh cần trả bạn số tiền này';
+        cardBg = 'bg-emerald-50 dark:bg-emerald-950/30 border-emerald-100 dark:border-emerald-900/50';
+        textColor = 'text-emerald-600 dark:text-emerald-400';
+      } else {
+        statusText = 'Bạn đang nợ Linh';
+        statusSubtext = 'Hãy thanh toán khoản nợ này cho Linh';
+        cardBg = 'bg-red-50 dark:bg-red-950/30 border-red-100 dark:border-red-900/50';
+        textColor = 'text-red-600 dark:text-red-400';
+      }
+    } else if (hanhOwesLinh < 0) {
+      amountText = formatCurrency(Math.abs(hanhOwesLinh));
+      if (activeUser === 'Linh') {
+        statusText = 'Bạn đang nợ Hạnh';
+        statusSubtext = 'Hãy thanh toán khoản nợ này cho Hạnh';
+        cardBg = 'bg-red-50 dark:bg-red-950/30 border-red-100 dark:border-red-900/50';
+        textColor = 'text-red-600 dark:text-red-400';
+      } else {
+        statusText = 'Linh đang nợ bạn';
+        statusSubtext = 'Linh cần trả bạn số tiền này';
+        cardBg = 'bg-emerald-50 dark:bg-emerald-950/30 border-emerald-100 dark:border-emerald-900/50';
+        textColor = 'text-emerald-600 dark:text-emerald-400';
+      }
+    } else {
+      statusText = 'Hai bạn đang hòa nhau';
+      statusSubtext = 'Không có khoản nợ nào cần thanh toán';
+      amountText = '0 đ';
+      hasDebt = false;
+    }
+
+    const handleQuickRepay = () => {
+      if (!hasDebt) return;
+      const debtAmt = Math.abs(hanhOwesLinh);
+      
+      setActiveTab('add');
+      setFormType('expense');
+      setFormAmount(formatInputNumber(debtAmt.toString()));
+      setFormSplitMode('repay');
+      
+      const repayCat = categories.expense.find(c => c.name.toLowerCase().includes('nợ') || c.name.toLowerCase().includes('khác')) 
+        || { name: 'Trả nợ', icon: '🔄' };
+      setFormCategory(repayCat);
+      setFormNote(`Trả nợ cho ${activeUser === 'Linh' ? 'Hạnh' : 'Linh'}`);
+    };
+
+    return (
+      <div className="p-4 space-y-4 animate-in fade-in duration-300">
+        <h2 className="text-xl font-bold text-gray-800 dark:text-white mb-4 text-center mt-4">Đối soát nợ</h2>
+
+        <div className={`border rounded-2xl p-6 shadow-sm text-center transition-colors ${cardBg}`}>
+          <p className="text-sm font-semibold text-gray-500 dark:text-gray-400 mb-1">{statusText}</p>
+          <h2 className={`text-3xl font-extrabold mb-2 ${textColor}`}>{amountText}</h2>
+          <p className="text-xs text-gray-400 dark:text-gray-500 mb-4">{statusSubtext}</p>
+          {hasDebt && (
+            <button onClick={handleQuickRepay} className="px-5 py-2.5 bg-teal-600 text-white text-xs font-bold rounded-xl shadow-md active:scale-95 transition-transform">
+              ⚡ Trả nợ nhanh
+            </button>
+          )}
+        </div>
+
+        <div>
+          <h3 className="font-bold text-gray-800 dark:text-gray-100 mb-3 mt-4 text-sm flex items-center">
+            <Users size={16} className="mr-2 text-teal-500" />
+            Lịch sử giao dịch chung ({sharedTxs.length})
+          </h3>
+          {sharedTxs.length === 0 ? (
+            <div className="text-center py-8 text-gray-400 bg-white dark:bg-gray-800 rounded-2xl border border-dashed border-gray-200 dark:border-gray-700">
+              <p className="text-sm">Chưa có giao dịch chia sẻ nào.</p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {sharedTxs.map(t => {
+                let badgeColor = '';
+                let badgeText = '';
+                if (t.splitMode === 'split_50_50') {
+                  badgeColor = 'bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400';
+                  badgeText = '👥 Chia đôi';
+                } else if (t.splitMode === 'pay_for_other') {
+                  badgeColor = 'bg-yellow-100 text-yellow-600 dark:bg-yellow-900/30 dark:text-yellow-400';
+                  badgeText = '💸 Trả hộ';
+                } else if (t.splitMode === 'repay') {
+                  badgeColor = 'bg-teal-100 text-teal-600 dark:bg-teal-900/30 dark:text-teal-400';
+                  badgeText = '🔄 Trả nợ';
+                }
+
+                let impactText = '';
+                if (t.splitMode === 'split_50_50') {
+                  impactText = `${t.createdBy} chi ${formatCurrency(t.amount)} -> ${t.createdBy === 'Linh' ? 'Hạnh' : 'Linh'} nợ ${formatCurrency(t.amount / 2)}`;
+                } else if (t.splitMode === 'pay_for_other') {
+                  impactText = `${t.createdBy} trả hộ 100% -> ${t.createdBy === 'Linh' ? 'Hạnh' : 'Linh'} nợ ${formatCurrency(t.amount)}`;
+                } else if (t.splitMode === 'repay') {
+                  impactText = `${t.createdBy} trả nợ cho ${t.createdBy === 'Linh' ? 'Hạnh' : 'Linh'} ${formatCurrency(t.amount)}`;
+                }
+
+                return (
+                  <div key={t.id} className="bg-white dark:bg-gray-800 p-3.5 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 flex items-center justify-between">
+                    <div className="flex items-center space-x-3 min-w-0">
+                      <div className={`w-9 h-9 rounded-full flex items-center justify-center text-base shrink-0 ${t.type === 'expense' ? 'bg-red-50 dark:bg-red-900/30' : 'bg-emerald-50 dark:bg-emerald-900/30'}`}>
+                        {t.categoryIcon}
+                      </div>
+                      <div className="min-w-0">
+                        <p className="font-semibold text-gray-800 dark:text-gray-100 text-sm truncate">{t.category}</p>
+                        <p className="text-[10px] text-gray-500 dark:text-gray-400 mt-0.5 truncate flex items-center">
+                          {t.note || new Date(t.date).toLocaleDateString('vi-VN')}
+                          <span className={`ml-2 px-1.5 py-0.5 rounded-[4px] text-[8px] font-bold ${t.createdBy === 'Linh' ? 'bg-purple-100 text-purple-600 dark:bg-purple-900/30 dark:text-purple-400' : 'bg-orange-100 text-orange-600 dark:bg-orange-900/30 dark:text-orange-400'}`}>
+                            {t.createdBy} trả
+                          </span>
+                        </p>
+                        <p className="text-[9px] text-gray-400 dark:text-gray-500 mt-1 italic font-medium">{impactText}</p>
+                      </div>
+                    </div>
+                    <div className="flex flex-col items-end shrink-0 ml-3">
+                      <span className={`font-bold text-sm ${t.type === 'expense' ? 'text-red-500' : 'text-emerald-500'}`}>
+                        {t.type === 'expense' ? '-' : '+'}{formatCurrency(t.amount)}
+                      </span>
+                      <span className={`mt-1.5 px-1.5 py-0.5 rounded-[4px] text-[8px] font-bold ${badgeColor}`}>
+                        {badgeText}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
   const renderSettings = () => {
     const handleUpdateBalance = async () => {
       const num = parseInputNumber(tempBalanceStr);
@@ -1092,29 +1329,34 @@ export default function ExpenseTrackerApp() {
             {activeTab === 'history' && renderHistory()}
             {activeTab === 'stats' && renderStats()}
             {activeTab === 'settings' && renderSettings()}
+            {activeTab === 'debt' && renderDebt()}
           </div>
 
           <div className="bg-white dark:bg-gray-900 border-t border-gray-200 dark:border-gray-800 px-2 flex justify-between items-center pb-safe shrink-0 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)] z-30 transition-colors">
-            <button onClick={() => {setActiveTab('dashboard'); setSelectedReport(null)}} className={`flex-1 flex flex-col items-center p-3 transition-colors ${activeTab === 'dashboard' ? 'text-teal-600 dark:text-teal-400' : 'text-gray-400 dark:text-gray-500'}`}>
-              <Home size={22} strokeWidth={activeTab === 'dashboard' ? 2.5 : 2} />
-              <span className="text-[9px] font-medium mt-1">Tổng quan</span>
+            <button onClick={() => {setActiveTab('dashboard'); setSelectedReport(null)}} className={`flex-1 flex flex-col items-center p-2.5 transition-colors ${activeTab === 'dashboard' ? 'text-teal-600 dark:text-teal-400' : 'text-gray-400 dark:text-gray-500'}`}>
+              <Home size={20} strokeWidth={activeTab === 'dashboard' ? 2.5 : 2} />
+              <span className="text-[8px] font-medium mt-1">Tổng quan</span>
             </button>
-            <button onClick={() => {setActiveTab('history'); setSelectedReport(null)}} className={`flex-1 flex flex-col items-center p-3 transition-colors ${activeTab === 'history' ? 'text-teal-600 dark:text-teal-400' : 'text-gray-400 dark:text-gray-500'}`}>
-              <ListIcon size={22} strokeWidth={activeTab === 'history' ? 2.5 : 2} />
-              <span className="text-[9px] font-medium mt-1">Lịch sử</span>
+            <button onClick={() => {setActiveTab('history'); setSelectedReport(null)}} className={`flex-1 flex flex-col items-center p-2.5 transition-colors ${activeTab === 'history' ? 'text-teal-600 dark:text-teal-400' : 'text-gray-400 dark:text-gray-500'}`}>
+              <ListIcon size={20} strokeWidth={activeTab === 'history' ? 2.5 : 2} />
+              <span className="text-[8px] font-medium mt-1">Lịch sử</span>
             </button>
-            <button onClick={() => {setActiveTab('add'); setSelectedReport(null)}} className="flex-1 flex flex-col items-center transform -translate-y-5">
-              <div className={`w-14 h-14 rounded-full flex items-center justify-center shadow-lg transition-transform ${activeTab === 'add' ? 'bg-teal-600 scale-105 shadow-teal-500/30' : 'bg-teal-500 hover:bg-teal-600'}`}>
-                <PlusCircle size={30} className="text-white" />
+            <button onClick={() => {setActiveTab('debt'); setSelectedReport(null)}} className={`flex-1 flex flex-col items-center p-2.5 transition-colors ${activeTab === 'debt' ? 'text-teal-600 dark:text-teal-400' : 'text-gray-400 dark:text-gray-500'}`}>
+              <Users size={20} strokeWidth={activeTab === 'debt' ? 2.5 : 2} />
+              <span className="text-[8px] font-medium mt-1">Đối soát</span>
+            </button>
+            <button onClick={() => {setActiveTab('add'); setSelectedReport(null)}} className="flex-1 flex flex-col items-center transform -translate-y-4">
+              <div className={`w-12 h-12 rounded-full flex items-center justify-center shadow-lg transition-transform ${activeTab === 'add' ? 'bg-teal-600 scale-105 shadow-teal-500/30' : 'bg-teal-500 hover:bg-teal-600'}`}>
+                <PlusCircle size={26} className="text-white" />
               </div>
             </button>
-            <button onClick={() => {setActiveTab('stats'); setSelectedReport(null)}} className={`flex-1 flex flex-col items-center p-3 transition-colors ${activeTab === 'stats' ? 'text-teal-600 dark:text-teal-400' : 'text-gray-400 dark:text-gray-500'}`}>
-              <PieChart size={22} strokeWidth={activeTab === 'stats' ? 2.5 : 2} />
-              <span className="text-[9px] font-medium mt-1">Báo cáo</span>
+            <button onClick={() => {setActiveTab('stats'); setSelectedReport(null)}} className={`flex-1 flex flex-col items-center p-2.5 transition-colors ${activeTab === 'stats' ? 'text-teal-600 dark:text-teal-400' : 'text-gray-400 dark:text-gray-500'}`}>
+              <PieChart size={20} strokeWidth={activeTab === 'stats' ? 2.5 : 2} />
+              <span className="text-[8px] font-medium mt-1">Báo cáo</span>
             </button>
-            <button onClick={() => {setActiveTab('settings'); setSelectedReport(null)}} className={`flex-1 flex flex-col items-center p-3 transition-colors ${activeTab === 'settings' ? 'text-teal-600 dark:text-teal-400' : 'text-gray-400 dark:text-gray-500'}`}>
-              <Settings size={22} strokeWidth={activeTab === 'settings' ? 2.5 : 2} />
-              <span className="text-[9px] font-medium mt-1">Cài đặt</span>
+            <button onClick={() => {setActiveTab('settings'); setSelectedReport(null)}} className={`flex-1 flex flex-col items-center p-2.5 transition-colors ${activeTab === 'settings' ? 'text-teal-600 dark:text-teal-400' : 'text-gray-400 dark:text-gray-500'}`}>
+              <Settings size={20} strokeWidth={activeTab === 'settings' ? 2.5 : 2} />
+              <span className="text-[8px] font-medium mt-1">Cài đặt</span>
             </button>
           </div>
 
