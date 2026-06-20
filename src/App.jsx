@@ -4,11 +4,14 @@ import {
   Calendar, AlignLeft, DollarSign, PieChart, Settings, 
   Plus, X, Lock, Download, Sun, Moon, Eye, EyeOff, 
   ChevronDown, ChevronRight, ArrowLeft, ChevronLeft, Save,
-  Users
+  Users, RotateCcw, GripVertical
 } from 'lucide-react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from 'firebase/auth';
-import { getFirestore, collection, onSnapshot, addDoc, deleteDoc, doc, query, setDoc, updateDoc } from 'firebase/firestore';
+import { getFirestore, collection, onSnapshot, addDoc, deleteDoc, doc, query, setDoc, updateDoc, getDocs } from 'firebase/firestore';
+import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
+import { startOfMonth, endOfMonth, eachDayOfInterval, format, isToday, addMonths, subMonths, getDay } from 'date-fns';
+import { vi } from 'date-fns/locale';
 
 const firebaseConfig = {
   apiKey: "AIzaSyB5sCEMHolcbH17xIADNI9ksChOd-uyKNU",
@@ -25,19 +28,110 @@ const appId = 'so-thu-chi-app';
 
 const DEFAULT_CATEGORIES = {
   expense: [
-    { name: 'Ăn uống', icon: '🍔', type: 'expense' },
-    { name: 'Di chuyển', icon: '🚗', type: 'expense' },
-    { name: 'Mua sắm', icon: '🛍️', type: 'expense' },
-    { name: 'Nhà cửa', icon: '🏠', type: 'expense' },
-    { name: 'Sức khỏe', icon: '💊', type: 'expense' },
+    // Chi tiêu - sinh hoạt
+    { name: 'Chợ, siêu thị', icon: '🛒', type: 'expense', group: 'Chi tiêu - sinh hoạt' },
+    { name: 'Ăn uống', icon: '🍲', type: 'expense', group: 'Chi tiêu - sinh hoạt' },
+    { name: 'Di chuyển', icon: '🚗', type: 'expense', group: 'Chi tiêu - sinh hoạt' },
+    
+    // Chi phí phát sinh
+    { name: 'Mua sắm', icon: '🛍️', type: 'expense', group: 'Chi phí phát sinh' },
+    { name: 'Giải trí', icon: '🎬', type: 'expense', group: 'Chi phí phát sinh' },
+    { name: 'Làm đẹp', icon: '💄', type: 'expense', group: 'Chi phí phát sinh' },
+    { name: 'Sức khỏe', icon: '💖', type: 'expense', group: 'Chi phí phát sinh' },
+    { name: 'Từ thiện', icon: '💝', type: 'expense', group: 'Chi phí phát sinh' },
+    
+    // Chi phí cố định
+    { name: 'Hóa đơn', icon: '🧾', type: 'expense', group: 'Chi phí cố định' },
+    { name: 'Nhà cửa', icon: '🏠', type: 'expense', group: 'Chi phí cố định' },
+    { name: 'Người thân', icon: '👶', type: 'expense', group: 'Chi phí cố định' },
+    
+    // Đầu tư - tiết kiệm
+    { name: 'Đầu tư', icon: '💸', type: 'expense', group: 'Đầu tư - tiết kiệm' },
+    { name: 'Học tập', icon: '📚', type: 'expense', group: 'Đầu tư - tiết kiệm' }
   ],
   income: [
-    { name: 'Lương', icon: '💰', type: 'income' },
-    { name: 'Thưởng', icon: '🎁', type: 'income' },
+    { name: 'Lương', icon: '💰', type: 'income', group: 'Thu nhập' },
+    { name: 'Thưởng', icon: '🎁', type: 'income', group: 'Thu nhập' },
+    { name: 'Kinh doanh', icon: '🏪', type: 'income', group: 'Thu nhập' },
+    { name: 'Khác', icon: '💸', type: 'income', group: 'Thu nhập' }
   ]
 };
 
-const EMOJI_LIST = ['🍔','🚗','🛍️','🧾','💰','🎁','🏠','💡','🎮','💊','📚','✈️','☕','🏥','🐶','👗','📱','💸','📦','🛠️'];
+const GROUP_STYLES = {
+  'Chi tiêu - sinh hoạt': {
+    border: 'border-orange-100 dark:border-orange-900/30',
+    bg: 'bg-orange-50/10 dark:bg-orange-950/5',
+    text: 'text-orange-600 dark:text-orange-400',
+    headerBg: 'bg-orange-50 dark:bg-orange-900/20',
+    indicator: 'bg-orange-500'
+  },
+  'Chi phí phát sinh': {
+    border: 'border-amber-100 dark:border-amber-900/30',
+    bg: 'bg-amber-50/10 dark:bg-amber-950/5',
+    text: 'text-amber-600 dark:text-amber-400',
+    headerBg: 'bg-amber-50 dark:bg-amber-900/20',
+    indicator: 'bg-amber-500'
+  },
+  'Chi phí cố định': {
+    border: 'border-blue-100 dark:border-blue-900/30',
+    bg: 'bg-blue-50/10 dark:bg-blue-950/5',
+    text: 'text-blue-600 dark:text-blue-400',
+    headerBg: 'bg-blue-50 dark:bg-blue-900/20',
+    indicator: 'bg-blue-500'
+  },
+  'Đầu tư - tiết kiệm': {
+    border: 'border-emerald-100 dark:border-emerald-900/30',
+    bg: 'bg-emerald-50/10 dark:bg-emerald-950/5',
+    text: 'text-emerald-600 dark:text-emerald-400',
+    headerBg: 'bg-emerald-50 dark:bg-emerald-900/20',
+    indicator: 'bg-emerald-500'
+  },
+  'Thu nhập': {
+    border: 'border-teal-100 dark:border-teal-900/30',
+    bg: 'bg-teal-50/10 dark:bg-teal-950/5',
+    text: 'text-teal-600 dark:text-teal-400',
+    headerBg: 'bg-teal-50 dark:bg-teal-900/20',
+    indicator: 'bg-teal-500'
+  }
+};
+
+const groupCategories = (catList, type) => {
+  const groups = {};
+  const groupOrder = type === 'expense' 
+    ? ['Chi tiêu - sinh hoạt', 'Chi phí phát sinh', 'Chi phí cố định', 'Đầu tư - tiết kiệm']
+    : ['Thu nhập'];
+  groupOrder.forEach(g => { groups[g] = []; });
+
+  if (!catList) return groups;
+  catList.forEach(cat => {
+    let g = cat.group;
+    if (!g) {
+      if (type === 'income') {
+        g = 'Thu nhập';
+      } else {
+        const name = cat.name.toLowerCase();
+        if (name.includes('ăn') || name.includes('chợ') || name.includes('siêu thị') || name.includes('di chuyển') || name.includes('xe')) {
+          g = 'Chi tiêu - sinh hoạt';
+        } else if (name.includes('mua sắm') || name.includes('giải trí') || name.includes('làm đẹp') || name.includes('sức khỏe') || name.includes('từ thiện') || name.includes('quà')) {
+          g = 'Chi phí phát sinh';
+        } else if (name.includes('hóa đơn') || name.includes('điện') || name.includes('nước') || name.includes('nhà') || name.includes('người thân')) {
+          g = 'Chi phí cố định';
+        } else if (name.includes('đầu tư') || name.includes('học')) {
+          g = 'Đầu tư - tiết kiệm';
+        } else {
+          g = 'Chi phí phát sinh';
+        }
+      }
+    }
+    if (!groups[g]) {
+      groups[g] = [];
+    }
+    groups[g].push(cat);
+  });
+  return groups;
+};
+
+const EMOJI_LIST = ['🍔','🚗','🛍️','🧾','💰','🎁','🏠','💡','🎮','💊','📚','✈️','☕','🏥','🐶','👗','📱','💸','📦','🛠️','🍜','🥦','🛒','🚕','🚌','⛽','✂️','💄','🧴','💻','🎧','⌚','⚽','🎾','🎟️','🎫','🖼️','👶','🍼','🧸','🐾','🐱','🪴','🌻','🔧','🧹','🧻','🚿','🛁','🔥','💧'];
 const CHART_COLORS = ['#3b82f6', '#f59e0b', '#10b981', '#8b5cf6', '#ec4899', '#06b6d4', '#f43f5e', '#84cc16'];
 
 const formatCurrency = (amount) => {
@@ -78,8 +172,14 @@ export default function ExpenseTrackerApp() {
   const [pinError, setPinError] = useState(false);
   const [activeUser, setActiveUser] = useState(''); // Hạnh hoặc Linh
 
-  const [isDarkMode, setIsDarkMode] = useState(false);
+  const [isDarkMode, setIsDarkMode] = useState(true);
   const [showBalance, setShowBalance] = useState(true);
+
+  // Quick Switch User hooks
+  const [showSwitchDropdown, setShowSwitchDropdown] = useState(false);
+  const [switchUserTarget, setSwitchUserTarget] = useState('');
+  const [switchUserPin, setSwitchUserPin] = useState('');
+  const [switchUserPinError, setSwitchUserPinError] = useState(false);
 
   const [user, setUser] = useState(null);
   const [isAuthReady, setIsAuthReady] = useState(false);
@@ -109,6 +209,7 @@ export default function ExpenseTrackerApp() {
   // Cài đặt danh mục
   const [newCatName, setNewCatName] = useState('');
   const [newCatIcon, setNewCatIcon] = useState('📦');
+  const [newCatGroup, setNewCatGroup] = useState('Chi tiêu - sinh hoạt');
   const [manageType, setManageType] = useState('expense');
   const [showPicker, setShowPicker] = useState(false);
 
@@ -139,6 +240,21 @@ export default function ExpenseTrackerApp() {
     else { setPinError(true); setPin(''); }
   };
 
+  const handleSwitchUserUnlock = (e) => {
+    e.preventDefault();
+    const correctPin = switchUserTarget === 'Hạnh' ? '2708' : '1201';
+    if (switchUserPin === correctPin) {
+      setActiveUser(switchUserTarget);
+      setSwitchUserTarget('');
+      setSwitchUserPin('');
+      setSwitchUserPinError(false);
+      showToast(`Đã chuyển sang tài khoản ${switchUserTarget}`);
+    } else {
+      setSwitchUserPinError(true);
+      setSwitchUserPin('');
+    }
+  };
+
   const showToast = (msg) => { setToastMsg(msg); setTimeout(() => setToastMsg(''), 3000); };
 
   useEffect(() => {
@@ -166,16 +282,30 @@ export default function ExpenseTrackerApp() {
       setTransactions(data);
     });
 
-    const unsubCat = onSnapshot(query(catRef), (snapshot) => {
-      const data = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-      if (data.length === 0) {
-        DEFAULT_CATEGORIES.expense.forEach(c => addDoc(catRef, c));
-        DEFAULT_CATEGORIES.income.forEach(c => addDoc(catRef, c));
-      } else {
-        const exp = data.filter(c => c.type === 'expense');
-        const inc = data.filter(c => c.type === 'income');
-        setCategories({ expense: exp, income: inc });
+    getDocs(query(catRef)).then(snapshot => {
+      if (snapshot.empty) {
+        [...DEFAULT_CATEGORIES.expense, ...DEFAULT_CATEGORIES.income].forEach(c => {
+          const catId = `${c.type}_${c.name}`.replace(/[\s\/]/g, '_');
+          setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'categories', catId), c);
+        });
       }
+    });
+
+    const unsubCat = onSnapshot(query(catRef), (snapshot) => {
+      const data = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
+      // Sort by order first
+      data.sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+      // Deduplicate by name+type, keeping the first occurrence
+      const seen = new Set();
+      const unique = data.filter(c => {
+        const key = `${c.type}_${c.name}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+      const exp = unique.filter(c => c.type === 'expense');
+      const inc = unique.filter(c => c.type === 'income');
+      setCategories({ expense: exp, income: inc });
     });
 
     const unsubAcc = onSnapshot(accRef, (docSnap) => {
@@ -379,14 +509,33 @@ export default function ExpenseTrackerApp() {
               {(!categories[editFormType] || categories[editFormType].length === 0) ? (
                 <div className="text-sm text-red-500 italic p-3 bg-red-50 dark:bg-red-900/20 rounded-xl">Chưa có danh mục.</div>
               ) : (
-                <div className="grid grid-cols-4 gap-2">
-                  {categories[editFormType]?.map((cat) => (
-                    <button key={cat.id || cat.name} type="button" onClick={() => setEditFormCategory(cat)}
-                      className={`flex flex-col items-center justify-center p-2 rounded-xl border transition-colors ${editFormCategory?.name === cat.name ? `border-${editFormType==='expense'?'red':'emerald'}-500 bg-${editFormType==='expense'?'red':'emerald'}-50 dark:bg-${editFormType==='expense'?'red':'emerald'}-900/20` : 'border-gray-100 dark:border-gray-700 bg-white dark:bg-gray-800 opacity-70 hover:opacity-100'}`}>
-                      <span className="text-xl mb-1">{cat.icon}</span>
-                      <span className="text-[10px] font-medium text-gray-600 dark:text-gray-300 truncate w-full text-center">{cat.name}</span>
-                    </button>
-                  ))}
+                <div className="space-y-4">
+                  {Object.entries(groupCategories(categories[editFormType], editFormType)).map(([groupName, cats]) => {
+                    const style = GROUP_STYLES[groupName] || GROUP_STYLES['Chi phí phát sinh'];
+                    if (cats.length === 0) return null;
+                    return (
+                      <div key={groupName} className={`rounded-2xl border ${style.border} ${style.bg} overflow-hidden shadow-sm`}>
+                        <div className={`px-4 py-2.5 ${style.headerBg} flex items-center space-x-2 border-b ${style.border}`}>
+                          <div className={`w-2.5 h-2.5 rounded-full ${style.indicator}`}></div>
+                          <span className={`text-[10px] font-bold uppercase tracking-wider ${style.text}`}>{groupName}</span>
+                        </div>
+                        <div className="p-3 grid grid-cols-4 gap-2">
+                          {cats.map((cat) => (
+                            <button key={cat.id || cat.name} type="button" onClick={() => setEditFormCategory(cat)}
+                              className={`flex flex-col items-center justify-center p-2 rounded-xl border transition-all duration-200 ${
+                                editFormCategory?.name === cat.name 
+                                  ? `border-${editFormType==='expense'?'red':'emerald'}-500 bg-${editFormType==='expense'?'red':'emerald'}-50 dark:bg-${editFormType==='expense'?'red':'emerald'}-900/20 scale-[1.03] shadow-sm` 
+                                  : 'border-gray-100 dark:border-gray-700 bg-white dark:bg-gray-800 opacity-80 hover:opacity-100 hover:scale-[1.02]'
+                              }`}
+                            >
+                              <span className="text-xl mb-1">{cat.icon}</span>
+                              <span className="text-[10px] font-medium text-gray-650 dark:text-gray-300 truncate w-full text-center">{cat.name}</span>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </div>
@@ -437,7 +586,9 @@ export default function ExpenseTrackerApp() {
       if (t.type === 'income') monthInc += t.amount;
       else {
         monthExp += t.amount;
-        expByCategory[t.category] = (expByCategory[t.category] || 0) + t.amount;
+        const catObj = categories.expense?.find(c => c.name === t.category);
+        const groupName = catObj?.group || 'Chi phí phát sinh';
+        expByCategory[groupName] = (expByCategory[groupName] || 0) + t.amount;
       }
     });
 
@@ -462,6 +613,15 @@ export default function ExpenseTrackerApp() {
       ? donutData.map(d => `${d.color} ${d.start}% ${d.end}%`).join(', ')
       : '#e5e7eb 0% 100%';
 
+    const goToCurrentMonthReport = () => {
+      setActiveTab('stats');
+      const today = new Date();
+      setSelectedReport({ 
+        title: `${today.getMonth() + 1}/${today.getFullYear()}`, 
+        filterFn: d => isSameMonth(new Date(d), today) 
+      });
+    };
+
     return (
       <div className="p-4 space-y-4 animate-in fade-in duration-300">
         <div className="bg-white dark:bg-gray-800 rounded-2xl p-5 shadow-sm border border-gray-100 dark:border-gray-700 transition-colors">
@@ -476,7 +636,7 @@ export default function ExpenseTrackerApp() {
           </h2>
         </div>
 
-        <div className="bg-white dark:bg-gray-800 rounded-2xl p-5 shadow-sm border border-gray-100 dark:border-gray-700 transition-colors">
+        <div onClick={goToCurrentMonthReport} className="bg-white dark:bg-gray-800 rounded-2xl p-5 shadow-sm border border-gray-100 dark:border-gray-700 transition-colors cursor-pointer hover:border-teal-400">
           <div className="flex justify-between items-center mb-6">
             <h3 className="font-bold text-gray-800 dark:text-gray-100">Tình hình thu chi</h3>
             <div className="bg-gray-100 dark:bg-gray-700 px-3 py-1.5 rounded-lg text-xs font-medium flex items-center space-x-1 cursor-pointer">
@@ -513,7 +673,7 @@ export default function ExpenseTrackerApp() {
           </div>
         </div>
 
-        <div className="bg-white dark:bg-gray-800 rounded-2xl p-5 shadow-sm border border-gray-100 dark:border-gray-700 transition-colors">
+        <div onClick={goToCurrentMonthReport} className="bg-white dark:bg-gray-800 rounded-2xl p-5 shadow-sm border border-gray-100 dark:border-gray-700 transition-colors cursor-pointer hover:border-teal-400">
           <div className="flex items-center space-x-6">
             <div className="relative w-32 h-32 rounded-full shrink-0 flex items-center justify-center" style={{ background: `conic-gradient(${conicStops})` }}>
               <div className="w-20 h-20 bg-white dark:bg-gray-800 rounded-full"></div>
@@ -613,14 +773,33 @@ export default function ExpenseTrackerApp() {
           {(!categories[formType] || categories[formType].length === 0) ? (
             <div className="text-sm text-red-500 italic p-3 bg-red-50 dark:bg-red-900/20 rounded-xl">Chưa có danh mục.</div>
           ) : (
-            <div className="grid grid-cols-4 gap-2">
-              {categories[formType]?.map((cat) => (
-                <button key={cat.id || cat.name} type="button" onClick={() => setFormCategory(cat)}
-                  className={`flex flex-col items-center justify-center p-2 rounded-xl border transition-colors ${formCategory?.name === cat.name ? `border-${formType==='expense'?'red':'emerald'}-500 bg-${formType==='expense'?'red':'emerald'}-50 dark:bg-${formType==='expense'?'red':'emerald'}-900/20` : 'border-gray-100 dark:border-gray-700 bg-white dark:bg-gray-800 opacity-70 hover:opacity-100'}`}>
-                  <span className="text-xl mb-1">{cat.icon}</span>
-                  <span className="text-[10px] font-medium text-gray-600 dark:text-gray-300 truncate w-full text-center">{cat.name}</span>
-                </button>
-              ))}
+            <div className="space-y-4">
+              {Object.entries(groupCategories(categories[formType], formType)).map(([groupName, cats]) => {
+                const style = GROUP_STYLES[groupName] || GROUP_STYLES['Chi phí phát sinh'];
+                if (cats.length === 0) return null;
+                return (
+                  <div key={groupName} className={`rounded-2xl border ${style.border} ${style.bg} overflow-hidden shadow-sm`}>
+                    <div className={`px-4 py-2.5 ${style.headerBg} flex items-center space-x-2 border-b ${style.border}`}>
+                      <div className={`w-2.5 h-2.5 rounded-full ${style.indicator}`}></div>
+                      <span className={`text-[10px] font-bold uppercase tracking-wider ${style.text}`}>{groupName}</span>
+                    </div>
+                    <div className="p-3 grid grid-cols-4 gap-2">
+                      {cats.map((cat) => (
+                        <button key={cat.id || cat.name} type="button" onClick={() => setFormCategory(cat)}
+                          className={`flex flex-col items-center justify-center p-2 rounded-xl border transition-all duration-200 ${
+                            formCategory?.name === cat.name 
+                              ? `border-${formType==='expense'?'red':'emerald'}-500 bg-${formType==='expense'?'red':'emerald'}-50 dark:bg-${formType==='expense'?'red':'emerald'}-900/20 scale-[1.03] shadow-sm` 
+                              : 'border-gray-100 dark:border-gray-700 bg-white dark:bg-gray-800 opacity-80 hover:opacity-100 hover:scale-[1.02]'
+                          }`}
+                        >
+                          <span className="text-xl mb-1">{cat.icon}</span>
+                          <span className="text-[10px] font-medium text-gray-700 dark:text-gray-200 truncate w-full text-center">{cat.name}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>
@@ -641,17 +820,19 @@ export default function ExpenseTrackerApp() {
             ))}
           </div>
         </div>
-        <div className="grid grid-cols-1 gap-4 bg-white dark:bg-gray-800 p-4 rounded-xl border border-gray-100 dark:border-gray-700 shadow-sm transition-colors">
-          <div>
-            <label className="flex items-center text-xs font-medium text-gray-700 dark:text-gray-300 mb-1"><Calendar className="w-3 h-3 mr-1" /> Ngày</label>
-            <input type="date" value={formDate} onChange={(e) => setFormDate(e.target.value)} className="w-full p-2 border-b border-gray-200 dark:border-gray-700 bg-transparent text-gray-900 dark:text-white text-sm focus:outline-none focus:border-teal-500" required />
+        <div className="sticky bottom-0 -mx-4 -mb-4 mt-6 p-4 bg-gray-50/95 dark:bg-gray-900/95 backdrop-blur-md border-t border-gray-200 dark:border-gray-800 z-10 rounded-t-2xl shadow-[0_-4px_15px_-3px_rgba(0,0,0,0.1)]">
+          <div className="grid grid-cols-2 gap-4 mb-4">
+            <div>
+              <label className="flex items-center text-xs font-medium text-gray-700 dark:text-gray-300 mb-1"><Calendar className="w-3 h-3 mr-1" /> Ngày</label>
+              <input type="date" value={formDate} onChange={(e) => setFormDate(e.target.value)} className="w-full p-2 border-b border-gray-200 dark:border-gray-700 bg-transparent text-gray-900 dark:text-white text-sm focus:outline-none focus:border-teal-500" required />
+            </div>
+            <div>
+              <label className="flex items-center text-xs font-medium text-gray-700 dark:text-gray-300 mb-1"><AlignLeft className="w-3 h-3 mr-1" /> Ghi chú</label>
+              <input type="text" value={formNote} onChange={(e) => setFormNote(e.target.value)} className="w-full p-2 border-b border-gray-200 dark:border-gray-700 bg-transparent text-gray-900 dark:text-white text-sm focus:outline-none focus:border-teal-500 placeholder-gray-400" placeholder="Không bắt buộc..." />
+            </div>
           </div>
-          <div>
-            <label className="flex items-center text-xs font-medium text-gray-700 dark:text-gray-300 mb-1"><AlignLeft className="w-3 h-3 mr-1" /> Ghi chú</label>
-            <input type="text" value={formNote} onChange={(e) => setFormNote(e.target.value)} className="w-full p-2 border-b border-gray-200 dark:border-gray-700 bg-transparent text-gray-900 dark:text-white text-sm focus:outline-none focus:border-teal-500 placeholder-gray-400" placeholder="Không bắt buộc..." />
-          </div>
+          <button type="submit" disabled={!formCategory} className={`w-full py-4 rounded-xl text-white font-bold text-lg shadow-lg transition-transform ${formType === 'expense' ? 'bg-red-500 shadow-red-500/30 hover:bg-red-600' : 'bg-emerald-500 shadow-emerald-500/30 hover:bg-emerald-600'} ${!formCategory ? 'opacity-50' : 'active:scale-95'}`}>Lưu Giao Dịch</button>
         </div>
-        <button type="submit" disabled={!formCategory} className={`w-full py-4 rounded-xl text-white font-bold text-lg mt-4 shadow-lg ${formType === 'expense' ? 'bg-red-500 shadow-red-500/30 hover:bg-red-600' : 'bg-emerald-500 shadow-emerald-500/30 hover:bg-emerald-600'} ${!formCategory ? 'opacity-50' : 'active:scale-95'}`}>Lưu Giao Dịch</button>
       </form>
     </div>
   );
@@ -770,7 +951,9 @@ export default function ExpenseTrackerApp() {
     const totalAmount = typeTx.reduce((sum, t) => sum + t.amount, 0);
 
     const groupedData = typeTx.reduce((acc, t) => {
-      acc[t.category] = (acc[t.category] || 0) + t.amount;
+      const catObj = categories[t.type]?.find(c => c.name === t.category);
+      const groupName = catObj?.group || (t.type === 'income' ? 'Thu nhập' : 'Chi phí phát sinh');
+      acc[groupName] = (acc[groupName] || 0) + t.amount;
       return acc;
     }, {});
 
@@ -780,7 +963,14 @@ export default function ExpenseTrackerApp() {
       .map(([name, amount], index) => {
         const percent = totalAmount > 0 ? (amount / totalAmount) * 100 : 0;
         const color = CHART_COLORS[index % CHART_COLORS.length];
-        const icon = categories[reportDetailType]?.find(c => c.name === name)?.icon || '📦';
+        
+        let icon = '📦';
+        if (name === 'Chi tiêu - sinh hoạt') icon = '🛒';
+        else if (name === 'Chi phí phát sinh') icon = '🛍️';
+        else if (name === 'Chi phí cố định') icon = '🧾';
+        else if (name === 'Đầu tư - tiết kiệm') icon = '💸';
+        else if (name === 'Thu nhập') icon = '💰';
+
         const start = currentPct;
         const end = start + percent;
         currentPct = end;
@@ -838,6 +1028,103 @@ export default function ExpenseTrackerApp() {
                 </div>
               ))
             )}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const renderCalendarReport = () => {
+    const targetMonth = new Date(statsYear, historyMonth - 1);
+    const start = startOfMonth(targetMonth);
+    const end = endOfMonth(targetMonth);
+    const days = eachDayOfInterval({ start, end });
+    const firstDayOfWeek = getDay(start);
+    const emptyDays = firstDayOfWeek === 0 ? 6 : firstDayOfWeek - 1;
+
+    let totalInc = 0;
+    let totalExp = 0;
+    
+    const dayData = {};
+    days.forEach(d => {
+      dayData[format(d, 'yyyy-MM-dd')] = { inc: 0, exp: 0 };
+    });
+
+    transactions.forEach(t => {
+      const txDate = new Date(t.date);
+      if (isSameMonth(txDate, targetMonth)) {
+        const key = format(txDate, 'yyyy-MM-dd');
+        if (dayData[key]) {
+          if (t.type === 'income') {
+            dayData[key].inc += t.amount;
+            totalInc += t.amount;
+          } else {
+            dayData[key].exp += t.amount;
+            totalExp += t.amount;
+          }
+        }
+      }
+    });
+
+    return (
+      <div className="flex flex-col animate-in fade-in">
+        <div className="flex items-center justify-between mb-6 px-2">
+          <button onClick={() => {
+            const newDate = subMonths(targetMonth, 1);
+            setHistoryMonth(newDate.getMonth() + 1);
+            setStatsYear(newDate.getFullYear());
+          }} className="p-2 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full">
+            <ChevronLeft size={24} />
+          </button>
+          <h3 className="font-bold text-xl text-gray-800 dark:text-white flex items-center">
+            Tháng {format(targetMonth, 'M yyyy')} <ChevronDown size={18} className="ml-2 text-gray-400" />
+          </h3>
+          <button onClick={() => {
+            const newDate = addMonths(targetMonth, 1);
+            setHistoryMonth(newDate.getMonth() + 1);
+            setStatsYear(newDate.getFullYear());
+          }} className="p-2 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full">
+            <ChevronRight size={24} />
+          </button>
+        </div>
+
+        <div className="bg-teal-50/50 dark:bg-gray-800/50 rounded-2xl p-4 mb-6 flex justify-between">
+          <div className="flex-1 text-center border-r border-gray-200 dark:border-gray-700">
+            <p className="text-sm text-gray-500 dark:text-gray-400 mb-1">Tổng thu</p>
+            <p className="font-bold text-emerald-500 text-lg">{formatCurrency(totalInc)} ₫</p>
+          </div>
+          <div className="flex-1 text-center border-r border-gray-200 dark:border-gray-700">
+            <p className="text-sm text-gray-500 dark:text-gray-400 mb-1">Tổng chi</p>
+            <p className="font-bold text-red-500 text-lg">{formatCurrency(totalExp)} ₫</p>
+          </div>
+          <div className="flex-1 text-center">
+            <p className="text-sm text-gray-500 dark:text-gray-400 mb-1">Chênh lệch</p>
+            <p className="font-bold text-gray-800 dark:text-white text-lg">{formatCurrency(totalInc - totalExp)} ₫</p>
+          </div>
+        </div>
+
+        <div className="bg-transparent">
+          <div className="grid grid-cols-7 gap-2 mb-2">
+            {['T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'CN'].map(d => (
+              <div key={d} className="text-center text-sm font-medium text-gray-500 py-1">{d}</div>
+            ))}
+          </div>
+          <div className="grid grid-cols-7 gap-2">
+            {Array.from({ length: emptyDays }).map((_, i) => (
+              <div key={`empty-${i}`} className="h-[72px] bg-transparent"></div>
+            ))}
+            {days.map(d => {
+              const key = format(d, 'yyyy-MM-dd');
+              const data = dayData[key];
+              const balance = data.inc - data.exp;
+              return (
+                <div key={key} className="h-[72px] bg-white dark:bg-gray-800 rounded-lg p-1 text-[10px] border border-gray-100 dark:border-gray-700 flex flex-col justify-between">
+                  <span className="font-bold text-gray-400">{format(d, 'd')}</span>
+                  {data.inc > 0 && <div className="text-emerald-500 truncate">+{data.inc > 1000 ? (data.inc/1000).toFixed(0)+'K' : data.inc}</div>}
+                  {data.exp > 0 && <div className="text-red-500 truncate">-{data.exp > 1000 ? (data.exp/1000).toFixed(0)+'K' : data.exp}</div>}
+                </div>
+              );
+            })}
           </div>
         </div>
       </div>
@@ -950,26 +1237,148 @@ export default function ExpenseTrackerApp() {
             )}
 
             {statsTab === 'month' && (() => {
-              const data = Array(12).fill(0).map(() => ({ inc: 0, exp: 0 }));
+              const targetMonth = new Date(statsYear, historyMonth - 1);
+              const start = startOfMonth(targetMonth);
+              const end = endOfMonth(targetMonth);
+              const days = eachDayOfInterval({ start, end });
+              const firstDayOfWeek = getDay(start);
+              const emptyDays = firstDayOfWeek === 0 ? 6 : firstDayOfWeek - 1;
+
+              let totalInc = 0;
+              let totalExp = 0;
+              
+              const dayData = {};
+              days.forEach(d => {
+                dayData[format(d, 'yyyy-MM-dd')] = { inc: 0, exp: 0 };
+              });
+
               transactions.forEach(t => {
-                const d = new Date(t.date);
-                if(d.getFullYear() === statsYear) {
-                  const m = d.getMonth();
-                  if(t.type === 'income') data[m].inc += t.amount; else data[m].exp += t.amount;
+                const txDate = new Date(t.date);
+                if (isSameMonth(txDate, targetMonth)) {
+                  const key = format(txDate, 'yyyy-MM-dd');
+                  if (dayData[key]) {
+                    if (t.type === 'income') {
+                      dayData[key].inc += t.amount;
+                      totalInc += t.amount;
+                    } else {
+                      dayData[key].exp += t.amount;
+                      totalExp += t.amount;
+                    }
+                  }
                 }
               });
-              const labels = ['1','2','3','4','5','6','7','8','9','10','11','12'];
-              const listData = data.map((d, i) => ({ 
-                label: `Tháng ${i+1}`, inc: d.inc, exp: d.exp, diff: d.inc - d.exp,
-                onClickItem: () => setSelectedReport({ title: `${i+1}/${statsYear}`, filterFn: (date) => date.getFullYear() === statsYear && date.getMonth() === i })
-              })).filter(d => d.inc > 0 || d.exp > 0).reverse();
+
+              const formatK = (amt) => {
+                if (amt === 0) return '';
+                if (amt >= 1000000) return (amt/1000000).toFixed(1).replace('.0','') + 'Tr';
+                if (amt >= 1000) return (amt/1000).toFixed(0) + 'K';
+                return amt;
+              };
 
               return (
-                <div>
-                  {renderChart(data, labels)}
-                  <div className="mt-8 border-t border-gray-100 dark:border-gray-800">
-                    {listData.length === 0 ? <p className="text-center py-4 text-sm text-gray-400">Chưa có số liệu.</p> : listData.map(renderSummaryItem)}
+                <div className="flex flex-col animate-in fade-in">
+                  <div className="flex items-center justify-between mb-6 px-2">
+                    <button onClick={() => {
+                      const newDate = subMonths(targetMonth, 1);
+                      setHistoryMonth(newDate.getMonth() + 1);
+                      setStatsYear(newDate.getFullYear());
+                    }} className="p-2 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full">
+                      <ChevronLeft size={24} />
+                    </button>
+                    <h3 className="font-bold text-xl text-gray-800 dark:text-white flex items-center">
+                      Tháng {format(targetMonth, 'M yyyy')} <ChevronDown size={18} className="ml-2 text-gray-400" />
+                    </h3>
+                    <button onClick={() => {
+                      const newDate = addMonths(targetMonth, 1);
+                      setHistoryMonth(newDate.getMonth() + 1);
+                      setStatsYear(newDate.getFullYear());
+                    }} className="p-2 text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full">
+                      <ChevronRight size={24} />
+                    </button>
                   </div>
+
+                  <div className="bg-teal-50/50 dark:bg-gray-800/50 rounded-2xl p-4 mb-6 flex justify-between">
+                    <div className="flex-1 text-center border-r border-gray-200 dark:border-gray-700">
+                      <p className="text-sm text-gray-500 dark:text-gray-400 mb-1">Tổng thu</p>
+                      <p className="font-bold text-emerald-500 text-lg">{formatCurrency(totalInc)} ₫</p>
+                    </div>
+                    <div className="flex-1 text-center border-r border-gray-200 dark:border-gray-700">
+                      <p className="text-sm text-gray-500 dark:text-gray-400 mb-1">Tổng chi</p>
+                      <p className="font-bold text-red-500 text-lg">{formatCurrency(totalExp)} ₫</p>
+                    </div>
+                    <div className="flex-1 text-center">
+                      <p className="text-sm text-gray-500 dark:text-gray-400 mb-1">Chênh lệch</p>
+                      <p className="font-bold text-gray-800 dark:text-white text-lg">{formatCurrency(totalInc - totalExp)} ₫</p>
+                    </div>
+                  </div>
+
+                  <div className="bg-transparent">
+                    <div className="grid grid-cols-7 gap-2 mb-2">
+                      {['T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'CN'].map(d => (
+                        <div key={d} className="text-center text-sm font-medium text-gray-500 py-1">{d}</div>
+                      ))}
+                    </div>
+                    <div className="grid grid-cols-7 gap-2">
+                      {Array.from({ length: emptyDays }).map((_, i) => (
+                        <div key={`empty-${i}`} className="h-[72px] bg-transparent"></div>
+                      ))}
+                      {days.map(d => {
+                        const key = format(d, 'yyyy-MM-dd');
+                        const data = dayData[key];
+                        return (
+                          <div key={key} onClick={() => {
+                            setActiveTab('history');
+                            setHistoryMonth(d.getMonth() + 1);
+                            setHistoryYear(d.getFullYear());
+                          }} className="h-[72px] rounded-xl border border-gray-100 dark:border-gray-800 bg-white dark:bg-gray-800 p-1.5 flex flex-col justify-between cursor-pointer hover:border-teal-400 hover:shadow-sm">
+                            <div className={`text-xs font-medium ${isToday(d) ? 'bg-teal-500 text-white w-5 h-5 flex items-center justify-center rounded-full -ml-0.5 -mt-0.5' : 'text-gray-700 dark:text-gray-300'}`}>
+                              {format(d, 'd')}
+                            </div>
+                            <div className="flex flex-col items-end text-[10px] font-semibold leading-tight">
+                              {data.inc > 0 && <span className="text-emerald-500">{formatK(data.inc)}</span>}
+                              {data.exp > 0 && <span className="text-red-500 mt-0.5">{formatK(data.exp)}</span>}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    
+                    <div className="mt-8 flex justify-end">
+                       <button onClick={() => {
+                          setActiveTab('history');
+                          setHistoryMonth(targetMonth.getMonth() + 1);
+                          setHistoryYear(targetMonth.getFullYear());
+                       }} className="text-teal-500 hover:text-teal-600 font-bold text-base flex items-center">
+                         Lịch sử ghi chép
+                       </button>
+                    </div>
+                  </div>
+
+                  {(() => {
+                    const oldData = Array(12).fill(0).map(() => ({ inc: 0, exp: 0 }));
+                    transactions.forEach(t => {
+                      const d = new Date(t.date);
+                      if(d.getFullYear() === statsYear) {
+                        const m = d.getMonth();
+                        if(t.type === 'income') oldData[m].inc += t.amount; else oldData[m].exp += t.amount;
+                      }
+                    });
+                    const labels = ['1','2','3','4','5','6','7','8','9','10','11','12'];
+                    const listData = oldData.map((d, i) => ({ 
+                      label: `Tháng ${i+1}`, inc: d.inc, exp: d.exp, diff: d.inc - d.exp,
+                      onClickItem: () => setSelectedReport({ title: `${i+1}/${statsYear}`, filterFn: (date) => date.getFullYear() === statsYear && date.getMonth() === i })
+                    })).filter(d => d.inc > 0 || d.exp > 0).reverse();
+
+                    return (
+                      <div className="mt-8 pt-8 border-t border-gray-100 dark:border-gray-800">
+                        <h4 className="font-bold text-gray-800 dark:text-white mb-4 text-center">Tổng quan năm {statsYear}</h4>
+                        {renderChart(oldData, labels)}
+                        <div className="mt-8 border-t border-gray-100 dark:border-gray-800">
+                          {listData.length === 0 ? <p className="text-center py-4 text-sm text-gray-400">Chưa có số liệu.</p> : listData.map(renderSummaryItem)}
+                        </div>
+                      </div>
+                    );
+                  })()}
                 </div>
               );
             })()}
@@ -1201,9 +1610,42 @@ export default function ExpenseTrackerApp() {
       e.preventDefault();
       if (!user || !newCatName) return;
       try {
-        await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'categories'), { name: newCatName, icon: newCatIcon, type: manageType });
+        const groupValue = manageType === 'expense' ? newCatGroup : 'Thu nhập';
+        await addDoc(collection(db, 'artifacts', appId, 'public', 'data', 'categories'), { 
+          name: newCatName, 
+          icon: newCatIcon, 
+          type: manageType,
+          group: groupValue
+        });
         setNewCatName(''); setShowPicker(false); showToast('Đã thêm danh mục mới');
       } catch (error) { console.error("Lỗi thêm danh mục", error); }
+    };
+
+    const handleResetCategories = async () => {
+      setConfirmModal({
+        isOpen: true,
+        message: 'Khôi phục danh mục gốc? (Thao tác này sẽ xóa tất cả danh mục hiện có và tải lại danh mục mặc định)',
+        onConfirm: async () => {
+          try {
+            const catRef = collection(db, 'artifacts', appId, 'public', 'data', 'categories');
+            // Step 1: Delete ALL existing category docs
+            const snapshot = await getDocs(catRef);
+            const deletePromises = snapshot.docs.map(d => deleteDoc(d.ref));
+            await Promise.all(deletePromises);
+            // Step 2: Add defaults with deterministic IDs to prevent duplicates
+            const allDefaults = [...DEFAULT_CATEGORIES.expense, ...DEFAULT_CATEGORIES.income];
+            const addPromises = allDefaults.map(cat => {
+              const catId = `${cat.type}_${cat.name}`.replace(/[\s\/]/g, '_');
+              return setDoc(doc(db, 'artifacts', appId, 'public', 'data', 'categories', catId), cat);
+            });
+            await Promise.all(addPromises);
+            showToast('Đã khôi phục danh mục mặc định!');
+          } catch (e) {
+            console.error(e);
+            showToast('Lỗi khi khôi phục danh mục');
+          }
+        }
+      });
     };
 
     const confirmDeleteCategory = (id) => {
@@ -1216,6 +1658,30 @@ export default function ExpenseTrackerApp() {
       });
     };
 
+    const handleDragEndCategory = async (result) => {
+      if (!result.destination) return;
+      const { source, destination } = result;
+      const groupName = source.droppableId;
+      if (source.droppableId !== destination.droppableId) return; // Only allow sorting within same group for now
+      
+      const allGroups = groupCategories(categories[manageType], manageType);
+      const items = Array.from(allGroups[groupName] || []);
+      const [reorderedItem] = items.splice(source.index, 1);
+      items.splice(destination.index, 0, reorderedItem);
+
+      // Update order in Firebase
+      const updatePromises = items.map((item, index) => {
+        if (!item.id) return Promise.resolve();
+        const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'categories', item.id);
+        return updateDoc(docRef, { order: index });
+      });
+      try {
+        await Promise.all(updatePromises);
+      } catch (e) {
+        console.error("Lỗi cập nhật thứ tự danh mục", e);
+      }
+    };
+
     const handleExportCSV = () => {
       const headers = ['Ngay', 'Loai', 'Danh muc', 'So tien', 'Ghi chu', 'Nguoi nhap'];
       const csvData = transactions.map(t => [t.date, t.type === 'income' ? 'Thu' : 'Chi', t.category, t.amount, t.note || '', t.createdBy || '']);
@@ -1224,19 +1690,6 @@ export default function ExpenseTrackerApp() {
       link.download = `SoThuChi_Export.csv`;
       document.body.appendChild(link); link.click(); document.body.removeChild(link);
       showToast('Đã tải file Excel');
-    };
-
-    const handleGenerateMockData = async () => {
-      const txRef = collection(db, 'artifacts', appId, 'public', 'data', 'transactions');
-      for(let i=0; i<30; i++) {
-        const type = Math.random() > 0.7 ? 'income' : 'expense';
-        const catList = categories[type];
-        if(!catList || catList.length === 0) continue;
-        const cat = catList[Math.floor(Math.random() * catList.length)];
-        const date = new Date(); date.setDate(date.getDate() - Math.floor(Math.random() * 90));
-        await addDoc(txRef, { type, amount: Math.floor(Math.random() * 50) * 50000 + 50000, category: cat.name, categoryIcon: cat.icon, date: date.toISOString().split('T')[0], note: 'Dữ liệu mẫu', createdBy: Math.random() > 0.5 ? 'Linh' : 'Hạnh', createdAt: new Date().toISOString() });
-      }
-      showToast('Đã tạo 30 giao dịch mẫu!');
     };
 
     return (
@@ -1263,14 +1716,14 @@ export default function ExpenseTrackerApp() {
         </div>
 
         <h3 className="text-sm font-bold text-gray-500 dark:text-gray-400 uppercase mb-3">Công cụ</h3>
-        <div className="grid grid-cols-2 gap-3 mb-8">
-          <button onClick={handleExportCSV} className="flex flex-col items-center justify-center p-4 bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
-            <Download size={24} className="text-teal-600 mb-2" />
-            <span className="text-xs font-medium text-gray-700 dark:text-gray-300">Xuất file CSV</span>
+        <div className="grid grid-cols-2 gap-2 mb-8">
+          <button onClick={handleExportCSV} className="flex flex-col items-center justify-center p-3 bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors text-center">
+            <Download size={20} className="text-teal-600 mb-1.5" />
+            <span className="text-[10px] font-semibold text-gray-700 dark:text-gray-300">Xuất CSV</span>
           </button>
-          <button onClick={handleGenerateMockData} className="flex flex-col items-center justify-center p-4 bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors">
-            <ListIcon size={24} className="text-purple-600 mb-2" />
-            <span className="text-xs font-medium text-gray-700 dark:text-gray-300">Tạo Data Mẫu</span>
+          <button onClick={handleResetCategories} className="flex flex-col items-center justify-center p-3 bg-white dark:bg-gray-800 rounded-xl border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors text-center">
+            <RotateCcw size={20} className="text-orange-500 mb-1.5" />
+            <span className="text-[10px] font-semibold text-gray-700 dark:text-gray-300">Reset Mục</span>
           </button>
         </div>
 
@@ -1281,13 +1734,28 @@ export default function ExpenseTrackerApp() {
         </div>
 
         <form onSubmit={handleAddCategory} className="mb-6 relative z-30">
-          <div className="flex space-x-2 bg-white dark:bg-gray-800 p-3 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700">
+          <div className="flex space-x-2 bg-white dark:bg-gray-800 p-3 rounded-xl shadow-sm border border-gray-100 dark:border-gray-700 mb-2">
             <button type="button" onClick={() => setShowPicker(!showPicker)} className="w-12 h-10 flex items-center justify-center text-xl bg-gray-50 dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-700">
               {newCatIcon}
             </button>
             <input type="text" value={newCatName} onChange={e => setNewCatName(e.target.value)} placeholder="Tên mục mới..." className="flex-1 bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-white rounded-lg px-3 border-0 outline-none text-sm w-[100px]" required />
             <button type="submit" className="bg-teal-500 text-white px-3 rounded-lg shrink-0"><Plus size={20} /></button>
           </div>
+          {manageType === 'expense' && (
+            <div className="mt-2 bg-white dark:bg-gray-800 p-2.5 rounded-xl border border-gray-100 dark:border-gray-700">
+              <label className="block text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-1">Nhóm danh mục mẹ</label>
+              <select 
+                value={newCatGroup} 
+                onChange={(e) => setNewCatGroup(e.target.value)}
+                className="w-full p-2 bg-gray-50 dark:bg-gray-900 text-gray-800 dark:text-white rounded-lg text-xs border border-gray-200 dark:border-gray-700 outline-none focus:border-teal-500"
+              >
+                <option value="Chi tiêu - sinh hoạt">Chi tiêu - sinh hoạt</option>
+                <option value="Chi phí phát sinh">Chi phí phát sinh</option>
+                <option value="Chi phí cố định">Chi phí cố định</option>
+                <option value="Đầu tư - tiết kiệm">Đầu tư - tiết kiệm</option>
+              </select>
+            </div>
+          )}
           {showPicker && (
             <div className="absolute top-16 left-0 z-50 w-full bg-white dark:bg-gray-800 p-3 rounded-xl shadow-xl border border-gray-200 dark:border-gray-700 grid grid-cols-7 gap-2">
               {EMOJI_LIST.map(emoji => (
@@ -1297,16 +1765,111 @@ export default function ExpenseTrackerApp() {
           )}
         </form>
 
-        <div className="space-y-2">
-          {categories[manageType]?.map(cat => (
-            <div key={cat.id || cat.name} className="flex justify-between items-center bg-white dark:bg-gray-800 p-3 rounded-xl border border-gray-100 dark:border-gray-700">
-              <div className="flex items-center space-x-3"><span className="text-2xl">{cat.icon}</span><span className="font-medium text-sm text-gray-700 dark:text-gray-200">{cat.name}</span></div>
-              {cat.id && <button onClick={() => confirmDeleteCategory(cat.id)} className="text-gray-400 hover:text-red-500 p-1"><X size={16} /></button>}
-            </div>
-          ))}
-        </div>
+        <DragDropContext onDragEnd={handleDragEndCategory}>
+          <div className="space-y-4">
+            {Object.entries(groupCategories(categories[manageType], manageType)).map(([groupName, cats]) => {
+              const style = GROUP_STYLES[groupName] || GROUP_STYLES['Chi phí phát sinh'];
+              if (cats.length === 0) return null;
+              return (
+                <div key={groupName} className={`rounded-2xl border ${style.border} ${style.bg} overflow-hidden shadow-sm`}>
+                  <div className={`px-4 py-2.5 ${style.headerBg} flex items-center space-x-2 border-b ${style.border}`}>
+                    <div className={`w-2.5 h-2.5 rounded-full ${style.indicator}`}></div>
+                    <span className={`text-[10px] font-bold uppercase tracking-wider ${style.text}`}>{groupName}</span>
+                  </div>
+                  <Droppable droppableId={groupName}>
+                    {(provided) => (
+                      <div className="p-3 space-y-2" {...provided.droppableProps} ref={provided.innerRef}>
+                        {cats.map((cat, index) => (
+                          <Draggable key={cat.id || cat.name} draggableId={cat.id || cat.name} index={index}>
+                            {(provided, snapshot) => (
+                              <div
+                                ref={provided.innerRef}
+                                {...provided.draggableProps}
+                                className={`flex justify-between items-center bg-white dark:bg-gray-800 p-3 rounded-xl border ${snapshot.isDragging ? 'border-teal-500 shadow-md scale-[1.02]' : 'border-gray-100 dark:border-gray-700'} transition-all`}
+                              >
+                                <div className="flex items-center space-x-3">
+                                  <div {...provided.dragHandleProps} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 p-1 cursor-grab active:cursor-grabbing">
+                                    <GripVertical size={16} />
+                                  </div>
+                                  <span className="text-2xl">{cat.icon}</span>
+                                  <span className="font-medium text-sm text-gray-700 dark:text-gray-200">{cat.name}</span>
+                                </div>
+                                {cat.id && (
+                                  <button onClick={() => confirmDeleteCategory(cat.id)} className="text-gray-400 hover:text-red-500 p-1">
+                                    <X size={16} />
+                                  </button>
+                                )}
+                              </div>
+                            )}
+                          </Draggable>
+                        ))}
+                        {provided.placeholder}
+                      </div>
+                    )}
+                  </Droppable>
+                </div>
+              );
+            })}
+          </div>
+        </DragDropContext>
         <div className="mt-10 text-center pb-8">
           <button onClick={() => setIsUnlocked(false)} className="text-sm text-red-500 font-medium px-4 py-2 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg">Khóa ứng dụng</button>
+        </div>
+      </div>
+    );
+  };
+
+  const renderSwitchUserModal = () => {
+    if (!switchUserTarget) return null;
+    return (
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm z-[60] flex items-center justify-center p-4 animate-in fade-in duration-200">
+        <div className="bg-white dark:bg-gray-900 p-6 rounded-2xl max-w-xs w-full shadow-2xl scale-100 animate-in zoom-in-95 duration-200 border border-gray-100 dark:border-gray-800 text-center">
+          <div className="flex justify-between items-center mb-4 border-b border-gray-100 dark:border-gray-800 pb-2">
+            <h3 className="text-lg font-bold text-gray-850 dark:text-white">Chuyển tài khoản</h3>
+            <button onClick={() => { setSwitchUserTarget(''); setSwitchUserPin(''); setSwitchUserPinError(false); }} className="text-gray-500 hover:text-gray-700 dark:hover:text-gray-300">
+              <X size={18} />
+            </button>
+          </div>
+          <div className="w-16 h-16 bg-teal-50 dark:bg-teal-900/30 rounded-full flex items-center justify-center mx-auto mb-4">
+            <Lock className="text-teal-500 w-8 h-8" />
+          </div>
+          <p className="text-gray-600 dark:text-gray-300 text-sm mb-4">
+            Nhập mã PIN của <span className="font-bold text-teal-600 dark:text-teal-400">{switchUserTarget}</span>
+          </p>
+          <form onSubmit={handleSwitchUserUnlock} className="space-y-4">
+            <input 
+              type="password" 
+              inputMode="numeric" 
+              maxLength={4} 
+              value={switchUserPin} 
+              onChange={(e) => setSwitchUserPin(e.target.value)} 
+              placeholder="••••"
+              autoFocus
+              className={`w-full text-center text-2xl tracking-[1em] p-3 border-2 rounded-2xl focus:outline-none transition-colors dark:text-white ${
+                switchUserPinError 
+                  ? 'border-red-400 bg-red-50 dark:bg-red-900/20' 
+                  : 'border-gray-200 dark:border-gray-700 focus:border-teal-500 bg-gray-50 dark:bg-gray-800'
+              }`} 
+            />
+            {switchUserPinError && (
+              <p className="text-red-500 text-xs font-medium">Mã PIN không đúng!</p>
+            )}
+            <div className="flex space-x-2 pt-2">
+              <button 
+                type="button" 
+                onClick={() => { setSwitchUserTarget(''); setSwitchUserPin(''); setSwitchUserPinError(false); }}
+                className="w-1/2 py-2.5 bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300 font-semibold rounded-xl hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors"
+              >
+                Hủy
+              </button>
+              <button 
+                type="submit" 
+                className="w-1/2 py-2.5 bg-teal-600 text-white font-semibold rounded-xl shadow-md hover:bg-teal-700 active:scale-95 transition-transform"
+              >
+                Xác nhận
+              </button>
+            </div>
+          </form>
         </div>
       </div>
     );
@@ -1325,7 +1888,30 @@ export default function ExpenseTrackerApp() {
               <h1 className="text-lg font-bold">Sổ Thu Chi</h1>
             </div>
             <div className="flex items-center space-x-3">
-              <div className="text-xs font-bold text-teal-600 bg-teal-50 dark:bg-teal-900/30 px-2 py-1 rounded-lg">👋 {activeUser}</div>
+              <div className="relative">
+                <button 
+                  onClick={() => setShowSwitchDropdown(!showSwitchDropdown)} 
+                  className="text-xs font-bold text-teal-600 bg-teal-50 dark:bg-teal-900/30 px-2 py-1 rounded-lg flex items-center space-x-1 hover:bg-teal-100 dark:hover:bg-teal-900/50 transition-colors focus:outline-none"
+                >
+                  <span>👋 {activeUser}</span>
+                  <ChevronDown size={12} />
+                </button>
+                
+                {showSwitchDropdown && (
+                  <div className="absolute right-0 mt-1 w-40 bg-white dark:bg-gray-805 rounded-lg shadow-lg border border-gray-100 dark:border-gray-700 py-1 z-[50] animate-in fade-in slide-in-from-top-2 duration-150">
+                    <button
+                      onClick={() => {
+                        setShowSwitchDropdown(false);
+                        const otherUser = activeUser === 'Hạnh' ? 'Linh' : 'Hạnh';
+                        setSwitchUserTarget(otherUser);
+                      }}
+                      className="w-full text-left px-3 py-2 text-xs font-medium text-gray-700 dark:text-gray-250 hover:bg-gray-50 dark:hover:bg-gray-700/50 flex items-center space-x-2"
+                    >
+                      <span>🔄 Chuyển sang: {activeUser === 'Hạnh' ? 'Linh' : 'Hạnh'}</span>
+                    </button>
+                  </div>
+                )}
+              </div>
               <button onClick={() => setIsDarkMode(!isDarkMode)} className="p-1.5 text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full transition-colors">
                 {isDarkMode ? <Sun size={18} /> : <Moon size={18} />}
               </button>
@@ -1377,6 +1963,7 @@ export default function ExpenseTrackerApp() {
 
           {renderConfirmModal()}
           {renderEditModal()}
+          {renderSwitchUserModal()}
         </div>
       </div>
     </div>
